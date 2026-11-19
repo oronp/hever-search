@@ -32,7 +32,7 @@ jobs:
         if: inputs.publish_pilot != true
         run: |
           python -m pip install 'playwright==1.60.0' 'beautifulsoup4==4.13.4'
-          python -m playwright install --with-deps chromium
+          python -m playwright install --only-shell chromium
       - name: Prepare static site
         run: |
           mkdir -p dist
