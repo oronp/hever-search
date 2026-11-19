@@ -77,8 +77,9 @@ def crawl_index(page, category, subcategory):
             continue
         page.goto(INDEX_URL, wait_until="domcontentloaded")
         page.locator("#Select1").select_option(primary_id)
-        page.locator("#second_type_i option:not([value='0'])").first.wait_for(state="attached")
         secondary_options = options(page, "#second_type_i")
+        if not secondary_options:
+            print(f"{primary}: no searchable subcategories", flush=True)
         for secondary_id, secondary in secondary_options:
             if subcategory and secondary != subcategory:
                 continue
