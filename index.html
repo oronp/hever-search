@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6ef">
+  <meta name="description" content="חיפוש הטבות חבר לפי שם, סוג חנות ועיר.">
+  <title>חיפוש הטבות חבר</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="brand" href="./" aria-label="חיפוש הטבות חבר, דף הבית">הטבות חבר</a>
+    <a class="source" href="https://www.mcc.co.il/st_reshet_public.aspx">לאתר חבר ↗</a>
+  </header>
+  <main class="page">
+    <section class="hero" aria-labelledby="title">
+      <h1 id="title">איזו הטבה מחפשים?</h1>
+      <label class="visually-hidden" for="query">חיפוש לפי שם עסק או מה שמחפשים לקנות</label>
+      <div class="searchbox">
+        <span class="search-icon" aria-hidden="true"></span>
+        <input id="query" type="search" placeholder="שם עסק, מוצר או תיאור קצר" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="examples" aria-label="חיפושים לדוגמה">
+        <button type="button" data-query="מתנה לבית">מתנה לבית</button>
+        <button type="button" data-query="כלי מטבח">כלי מטבח</button>
+        <button type="button" data-query="KARE" dir="ltr">KARE</button>
+      </div>
+    </section>
+    <section class="results" aria-label="בתי עסק">
+      <div class="filter-row">
+        <label>קטגוריה <select id="category"><option value="">כל הקטגוריות</option></select></label>
+        <label>עיר <select id="city"><option value="">כל הערים</option></select></label>
+      </div>
+      <div class="result-info">
+        <p id="status" role="status">טוען את רשימת העסקים…</p>
+        <p id="updated"></p>
+      </div>
+      <ul id="results" class="result-list"></ul>
+      <button id="more" class="more" type="button" hidden>הצגת עסקים נוספים</button>
+    </section>
+  </main>
+  <footer class="footer">אינדקס עצמאי. אחוזי ההנחה ותנאי המימוש מופיעים בעמוד ההטבה הרשמי.</footer>
+</body>
+</html>
