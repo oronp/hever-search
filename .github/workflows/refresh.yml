@@ -30,9 +30,7 @@ jobs:
           python-version: '3.12'
       - name: Install scraper dependencies
         if: inputs.publish_pilot != true
-        run: |
-          python -m pip install 'playwright==1.60.0' 'beautifulsoup4==4.13.4'
-          python -m playwright install --only-shell chromium
+        run: python -m pip install 'beautifulsoup4==4.13.4'
       - name: Prepare static site
         run: |
           mkdir -p dist

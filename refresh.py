@@ -4,18 +4,23 @@ import argparse
 import json
 import re
 import time
+from ast import literal_eval
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from http.cookiejar import CookieJar
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urlparse
+from urllib.request import HTTPCookieProcessor, build_opener
 
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
 
 INDEX_URL = "https://www.mcc.co.il/st_reshet_public.aspx"
 OFFER_URL = "https://www.mcc.co.il/site/pg/st_reshet_out&p1="
-LABEL = "חפש בתי עסק"
-NO_RESULTS = re.compile(r"לא נמצאו|לא נמצא|אין תוצאות|אין בתי עסק|אין נתונים")
+SUBCATEGORIES = re.compile(r"\bvar\s+new_types\s*=\s*new Array\s*\((.*?)\[\s*\]\s*\);", re.DOTALL)
+SUBCATEGORY = re.compile(r"new Array\(\s*(\d+)\s*,\s*(\d+)\s*,\s*('(?:[^'\\]|\\.)*')\s*\)")
+MERCHANT_CLICK = re.compile(r"\s*mclick\(\s*['\"]?(\d+)['\"]?\s*\)\s*;?\s*")
+NO_RESULTS = "אין תוצאות המתאימות לחיפוש"
 WORD = re.compile(r"[א-תA-Za-z]{3,}")
 STOP = set("אשר אלא אלו האתר הינה הינו החל הזה החברה הכול הכל ועוד הוא היא ויש כמו ללא להם לכל לכם לנו כאן ניתן עוד עבור אחד אנחנו ביותר באתר מגוון מוצרים מציעה כולל כוללנית החברה מהווה בעולם בישראל הלקוחות שלנו השירות".split())
 
@@ -24,94 +29,119 @@ def clean(text):
     return " ".join(text.split())
 
 
-def options(page, selector):
-    return page.locator(f"{selector} option").evaluate_all(
-        """opts => opts.filter(o => o.value && o.value !== '0' && !o.disabled)
-                       .map(o => [o.value, o.textContent.trim()])"""
-    )
-
-
-def parse_list(page, primary, secondary):
-    table = page.locator("#object_table")
-    if not table.count():
-        if page.get_by_text(NO_RESULTS).first.is_visible():
-            return []
-        raise RuntimeError(f"Missing results table for {primary} / {secondary}")
-    # DataTables removes off-page rows from the document but retains their nodes.
-    rows = table.evaluate(
-        """table => {
-            if (table.classList.contains('dataTable') && !window.jQuery?.fn?.dataTable) {
-                throw new Error('The table is paginated, but its DataTables API is unavailable');
-            }
-            const hasTable = window.jQuery?.fn?.dataTable?.isDataTable(table);
-            const allRows = hasTable
-                ? window.jQuery(table).DataTable().rows().nodes().toArray()
-                : [...table.tBodies[0].rows];
-            return allRows.map(row => ({
-                click: row.getAttribute('onclick') || '',
-                placeholder: Boolean(row.querySelector('.dataTables_empty, .dt-empty')),
-                name: (row.querySelector('.title') || row.cells[0])?.textContent.trim(),
-                discount: row.cells[1]?.textContent.trim()
-            }));
-        }"""
-    )
-    merchants = []
-    for row in rows:
-        if row["placeholder"]:
-            continue
-        match = re.fullmatch(r"\s*mclick\(\s*['\"]?(\d+)['\"]?\s*\)\s*;?\s*", row["click"])
-        if not match or not row.get("name") or not row.get("discount"):
-            raise RuntimeError(f"Unexpected result row for {primary} / {secondary}")
-        merchants.append((match[1], clean(row["name"]), clean(row["discount"])))
-    return merchants
-
-
-def crawl_index(page, category, subcategory):
-    stores = {}
-    source = page.goto(INDEX_URL, wait_until="domcontentloaded")
-    if source and source.status == 429:
-        retry_after = source.headers.get("retry-after", "60")
+def fetch(client, url, fields=None):
+    payload = urlencode(fields).encode() if fields is not None else None
+    for attempt in range(2):
         try:
-            delay = int(retry_after) if retry_after.isdecimal() else (
-                parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)
-            ).total_seconds()
-        except (TypeError, ValueError):
-            delay = 60
-        if delay <= 120:
+            with client.open(url, data=payload, timeout=25) as response:
+                destination = urlparse(response.url)
+                if destination.scheme != "https" or destination.hostname != "www.mcc.co.il":
+                    raise ValueError(f"Unexpected redirect from {url}")
+                return response.read()
+        except HTTPError as error:
+            error.close()
+            raise
+        except OSError as error:
+            if attempt:
+                raise
+            print(f"Connection interrupted. Retrying once after 2s: {error}", flush=True)
+            time.sleep(2)
+
+
+def get_index(client):
+    for attempt in range(2):
+        try:
+            return fetch(client, INDEX_URL)
+        except HTTPError as error:
+            if error.code != 429 or attempt:
+                raise RuntimeError(f"Public index unavailable: HTTP {error.code}") from error
+            retry_after = error.headers.get("Retry-After", "60")
+            try:
+                delay = int(retry_after) if retry_after.isdecimal() else (
+                    parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)
+                ).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                delay = 60
+            if delay > 120:
+                raise RuntimeError(f"Public index returned HTTP 429 and requested a wait of {delay:.0f}s") from error
             delay = max(1, delay)
             print(f"Catalog returned HTTP 429. Retrying once after {delay:.0f}s.", flush=True)
             time.sleep(delay)
-            source = page.goto(INDEX_URL, wait_until="domcontentloaded")
-        else:
-            print(f"Catalog requested a wait of {delay:.0f}s. Ending this refresh.", flush=True)
-    if source is None or not source.ok or not page.locator("#Select1").count():
-        status = source.status if source else "no response"
-        message = clean(page.locator("body").inner_text(timeout=5000))[:220]
-        raise RuntimeError(f"Public index unavailable: HTTP {status}, {page.url}, title={page.title()!r}, response={message!r}")
-    primary_options = options(page, "#Select1")
-    if not primary_options:
+
+
+def parse_categories(page):
+    categories = {
+        option["value"]: (option.get_text(strip=True), [])
+        for option in page.select("#Select1 option[value]:not([disabled])")
+        if option["value"] not in ("", "0")
+    }
+    if not categories:
         raise RuntimeError("No categories found on the public index")
-    for primary_id, primary in primary_options:
+    script = page.find("script", string=SUBCATEGORIES)
+    if script is None:
+        raise RuntimeError("Could not find subcategories on the public index")
+    block = SUBCATEGORIES.search(script.string)[1]
+    if SUBCATEGORY.sub("", block).strip(", \t\r\n"):
+        raise RuntimeError("Unexpected subcategory format on the public index")
+    for primary_id, secondary_id, label in SUBCATEGORY.findall(block):
+        if primary_id in categories:
+            categories[primary_id][1].append((secondary_id, literal_eval(label).strip()))
+    if not any(subcategories for _, subcategories in categories.values()):
+        raise RuntimeError("No subcategories found on the public index")
+    return categories
+
+
+def parse_list(page, primary, secondary):
+    table = page.select_one("#object_table tbody")
+    if table is None:
+        raise RuntimeError(f"Missing results table for {primary} / {secondary}")
+    merchants = []
+    for row in table.find_all("tr", recursive=False):
+        if row.select_one(".dataTables_empty, .dt-empty"):
+            continue
+        match = MERCHANT_CLICK.fullmatch(row.get("onclick", ""))
+        cells = row.find_all(["td", "th"], recursive=False)
+        if not match or len(cells) < 2:
+            raise RuntimeError(f"Unexpected result row for {primary} / {secondary}")
+        name = clean((row.select_one(".title") or cells[0]).get_text())
+        discount = clean(cells[1].get_text())
+        if not name or not discount:
+            raise RuntimeError(f"Unexpected result row for {primary} / {secondary}")
+        merchants.append((match[1], name, discount))
+    return merchants
+
+
+def crawl_index(client, category, subcategory):
+    stores = {}
+    page = BeautifulSoup(get_index(client), "html.parser")
+    hidden_fields = {
+        field["name"]: field.get("value", "")
+        for field in page.select("form[name=stForm] input[type=hidden][name]")
+    }
+    for primary_id, (primary, secondary_options) in parse_categories(page).items():
         if category and primary != category:
             continue
-        page.goto(INDEX_URL, wait_until="domcontentloaded")
-        page.locator("#Select1").select_option(primary_id)
-        secondary_options = options(page, "#second_type_i")
         if not secondary_options:
             print(f"{primary}: no searchable subcategories", flush=True)
         for secondary_id, secondary in secondary_options:
             if subcategory and secondary != subcategory:
                 continue
-            page.locator("#second_type_i").select_option(secondary_id)
-            page.locator("#region2").select_option("0")
-            with page.expect_navigation(wait_until="domcontentloaded") as navigation:
-                page.get_by_role("button", name=LABEL, exact=True).click()
-            response = navigation.value
-            if response is None or not response.ok:
-                raise RuntimeError(f"Search request failed for {primary} / {secondary}")
-            if page.locator("#second_type_i").input_value() != secondary_id:
-                raise RuntimeError(f"Search returned the wrong filter for {primary} / {secondary}")
-            rows = parse_list(page, primary, secondary)
+            fields = dict(hidden_fields, main_type=primary_id, second_type_i=secondary_id,
+                          second_type=secondary_id, region2="0", region="0", freeSearch="", search_method="type")
+            try:
+                result = BeautifulSoup(fetch(client, INDEX_URL, fields), "html.parser")
+            except OSError as error:
+                raise RuntimeError(f"Search request failed for {primary} / {secondary}: {error}") from error
+            if result.find("font", string=NO_RESULTS):
+                rows = []
+            else:
+                selected = {
+                    field: result.select_one(f'form[name=stForm] input[name="cmb_{field}"]')
+                    for field in ("main_type", "second_type_i", "region2")
+                }
+                if any(control is None or control.get("value") != fields[field] for field, control in selected.items()):
+                    raise RuntimeError(f"Search returned the wrong filters for {primary} / {secondary}")
+                rows = parse_list(result, primary, secondary)
             print(f"{primary} / {secondary}: {len(rows)}", flush=True)
             for merchant_id, name, discount in rows:
                 merchant = stores.setdefault(
@@ -146,25 +176,18 @@ def parse_detail(html):
     return {"keywords": keywords[:120], "cities": cities}
 
 
-def enrich_stores(request, stores):
+def enrich_stores(client, stores):
     for index, merchant in enumerate(stores.values(), 1):
-        error = None
         for attempt in range(3):
-            response = request.get(merchant["url"], timeout=25000, max_retries=1)
             try:
-                if not response.ok or urlparse(response.url).hostname != "www.mcc.co.il":
-                    raise ValueError(f"Unexpected HTTP response ({response.status})")
-                merchant.update(parse_detail(response.text()))
+                merchant.update(parse_detail(fetch(client, merchant["url"])))
                 break
-            except ValueError as exc:
-                error = exc
-                if response.status in {401, 403, 429}:
-                    raise RuntimeError(f"Source declined detail request: HTTP {response.status}") from exc
+            except (ValueError, HTTPError) as error:
+                if isinstance(error, HTTPError) and error.code in {401, 403, 429}:
+                    raise RuntimeError(f"Source declined detail request: HTTP {error.code}") from error
+                if attempt == 2:
+                    raise RuntimeError(f"Could not read offer {merchant['id']}: {error}") from error
                 time.sleep(attempt + 1)
-            finally:
-                response.dispose()
-        else:
-            raise RuntimeError(f"Could not read offer {merchant['id']}: {error}")
         if index % 50 == 0 or index == len(stores):
             print(f"Offer pages: {index}/{len(stores)}", flush=True)
         time.sleep(0.35)
@@ -188,24 +211,18 @@ def main():
     parser.add_argument("--subcategory", help="Restrict the crawl to one subcategory")
     args = parser.parse_args()
 
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
-        context = browser.new_context(locale="he-IL")
-        page = context.new_page()
-        page.set_default_timeout(25000)
-        page.route("**/*", lambda route: route.abort() if route.request.resource_type in {
-            "image", "font", "media",
-        } else route.continue_())
-        stores = crawl_index(page, args.category, args.subcategory)
-        if not stores:
-            raise RuntimeError("No merchants collected. The current catalog was not replaced.")
-        if args.output.exists():
-            previous = json.loads(args.output.read_text())
-            scope = [args.category, args.subcategory]
-            if previous.get("scope") == scope and len(stores) < len(previous["stores"]) * 0.7:
-                raise RuntimeError("Catalog size fell substantially. The current catalog was not replaced.")
-        enrich_stores(context.request, stores)
-        write_catalog(args.output, stores, [args.category, args.subcategory])
+    client = build_opener(HTTPCookieProcessor(CookieJar()))
+    client.addheaders = [("User-Agent", "hever-search/1.0 (+https://github.com/oronp/hever-search)")]
+    stores = crawl_index(client, args.category, args.subcategory)
+    if not stores:
+        raise RuntimeError("No merchants collected. The current catalog was not replaced.")
+    scope = [args.category, args.subcategory]
+    if args.output.exists():
+        previous = json.loads(args.output.read_text())
+        if previous.get("scope") == scope and len(stores) < len(previous["stores"]) * 0.7:
+            raise RuntimeError("Catalog size fell substantially. The current catalog was not replaced.")
+    enrich_stores(client, stores)
+    write_catalog(args.output, stores, scope)
     print(f"Saved {len(stores)} merchants to {args.output}")
 
 

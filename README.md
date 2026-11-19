@@ -15,8 +15,7 @@ GitHub Actions מנסה לעדכן את האינדקס ביום ראשון ב־0
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install 'playwright==1.60.0' 'beautifulsoup4==4.13.4'
-python -m playwright install chromium
+pip install 'beautifulsoup4==4.13.4'
 python refresh.py --category לבית --subcategory 'עיצוב הבית'
 python -m http.server 8000
 ```
