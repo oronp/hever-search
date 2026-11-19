@@ -1,6 +1,9 @@
 name: Refresh and publish
 
 on:
+  push:
+    branches: [main]
+    paths: [stores.json]
   schedule:
     - cron: '17 4 * * 0'
       timezone: Asia/Jerusalem
@@ -25,19 +28,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        if: inputs.publish_pilot != true
+        if: github.event_name != 'push' && inputs.publish_pilot != true
         with:
           python-version: '3.12'
       - name: Install scraper dependencies
-        if: inputs.publish_pilot != true
+        if: github.event_name != 'push' && inputs.publish_pilot != true
         run: python -m pip install 'beautifulsoup4==4.13.4'
       - name: Prepare static site
         run: |
           mkdir -p dist
           cp index.html style.css app.js dist/
       - name: Refresh merchant index
-        if: inputs.publish_pilot != true
+        if: github.event_name != 'push' && inputs.publish_pilot != true
         run: python refresh.py --output dist/stores.json
+      - name: Use the locally refreshed catalog
+        if: github.event_name == 'push'
+        run: cp stores.json dist/stores.json
       - name: Use verified pilot catalog
         if: inputs.publish_pilot == true
         run: cp pilot-stores.json dist/stores.json
