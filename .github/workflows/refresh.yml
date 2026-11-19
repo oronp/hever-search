@@ -1,0 +1,50 @@
+name: Refresh and publish
+
+on:
+  schedule:
+    - cron: '17 4 * * 0'
+      timezone: Asia/Jerusalem
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hever-pages
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install scraper dependencies
+        run: |
+          python -m pip install 'playwright==1.60.0' 'beautifulsoup4==4.13.4'
+          python -m playwright install --with-deps chromium
+      - name: Refresh merchant index
+        run: |
+          mkdir -p dist
+          cp index.html style.css app.js dist/
+          python refresh.py --output dist/stores.json
+      - name: Upload site bundle
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+  publish:
+    needs: collect
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy catalog
+        id: deployment
+        uses: actions/deploy-pages@v4
