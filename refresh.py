@@ -67,8 +67,11 @@ def parse_list(page, primary, secondary):
 
 def crawl_index(page, category, subcategory):
     stores = {}
-    page.goto(INDEX_URL, wait_until="domcontentloaded")
-    page.locator("#Select1").wait_for()
+    source = page.goto(INDEX_URL, wait_until="domcontentloaded")
+    if source is None or not source.ok or not page.locator("#Select1").count():
+        status = source.status if source else "no response"
+        message = clean(page.locator("body").inner_text(timeout=5000))[:220]
+        raise RuntimeError(f"Public index unavailable: HTTP {status}, {page.url}, title={page.title()!r}, response={message!r}")
     primary_options = options(page, "#Select1")
     if not primary_options:
         raise RuntimeError("No categories found on the public index")
