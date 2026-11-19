@@ -5,6 +5,7 @@ import json
 import re
 import time
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -68,6 +69,21 @@ def parse_list(page, primary, secondary):
 def crawl_index(page, category, subcategory):
     stores = {}
     source = page.goto(INDEX_URL, wait_until="domcontentloaded")
+    if source and source.status == 429:
+        retry_after = source.headers.get("retry-after", "60")
+        try:
+            delay = int(retry_after) if retry_after.isdecimal() else (
+                parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            delay = 60
+        if delay <= 120:
+            delay = max(1, delay)
+            print(f"Catalog returned HTTP 429. Retrying once after {delay:.0f}s.", flush=True)
+            time.sleep(delay)
+            source = page.goto(INDEX_URL, wait_until="domcontentloaded")
+        else:
+            print(f"Catalog requested a wait of {delay:.0f}s. Ending this refresh.", flush=True)
     if source is None or not source.ok or not page.locator("#Select1").count():
         status = source.status if source else "no response"
         message = clean(page.locator("body").inner_text(timeout=5000))[:220]
