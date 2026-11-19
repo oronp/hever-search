@@ -153,11 +153,4 @@ fields.more.addEventListener("click", () => {
   limit += PAGE_SIZE;
   render();
 });
-for (const button of document.querySelectorAll("[data-query]")) {
-  button.addEventListener("click", () => {
-    fields.query.value = button.dataset.query;
-    searchAgain();
-    fields.query.focus();
-  });
-}
 start();

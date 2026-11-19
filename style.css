@@ -24,9 +24,8 @@ h1 { font-size: clamp(2.15rem, 7vw, 4.2rem); margin: 0 0 .45em; line-height: 1.0
 .searchbox input { width: 100%; min-height: 60px; padding: 10px 50px 10px 16px; background: #fff; border: 1px solid #819e8b; border-radius: 12px; }
 .search-icon { position: absolute; inset-block-start: 19px; inset-inline-start: 19px; width: 17px; height: 17px; border: 2px solid #315b46; border-radius: 50%; pointer-events: none; }
 .search-icon::after { content: ""; position: absolute; width: 8px; height: 2px; background: #315b46; bottom: -3px; left: -5px; transform: rotate(-45deg); }
-.examples { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 13px; }
-.examples button, .more { background: transparent; border: 1px solid #b8c8b6; border-radius: 20px; padding: 5px 14px; font-size: .87rem; }
-.examples button:hover, .more:hover { background: #e3eddf; }
+.more { background: transparent; border: 1px solid #b8c8b6; border-radius: 20px; padding: 5px 14px; font-size: .87rem; margin-top: 16px; }
+.more:hover { background: #e3eddf; }
 .filter-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .filter-row label { display: grid; gap: 5px; flex: 1 1 145px; max-width: 250px; font-size: .82rem; font-weight: 700; }
 select { min-width: 0; width: 100%; padding: 8px; background: #fff; border: 1px solid #b8c8b6; border-radius: 6px; font-weight: 400; }
@@ -37,7 +36,6 @@ select { min-width: 0; width: 100%; padding: 8px; background: #fff; border: 1px 
 .result-card h2 { font-size: 1.05rem; line-height: 1.25; margin: 0; overflow-wrap: anywhere; }
 .result-card .meta { margin: .3em 0 0; }
 .discount { display: inline-block; color: var(--green); background: #e4f0e3; padding: 3px 10px; border-radius: 6px; font-size: .88rem; font-weight: 750; max-width: 15ch; text-align: center; overflow-wrap: anywhere; }
-.more { margin-top: 16px; }
 .footer { margin-block: 37px 22px; border-top: 1px solid var(--line); padding-top: 14px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 480px) {
